@@ -14,6 +14,8 @@ wss.on("connection", function connection(ws) {
     if (event.action == "createGame") {
       //only tell the gamemanager to put the current player in lobby if they requested to create a game
       mainGameManager.addPlayerToLobby(event);
+    } else if (event.action == "makeMove") {
+      mainGameManager.makeMove(event.gameObj, event.move);
     }
   });
   console.log("a player got made connection to this server");
