@@ -2,3 +2,7 @@ node_modules
 server/dist
 server/design.txt
 highLevelDesign.txt
+
+# AI assistant configs
+.agents/
+.claude/

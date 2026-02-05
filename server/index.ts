@@ -1,4 +1,4 @@
-import { WebSocketServer } from "ws";
+import { WebSocketServer, type WebSocket as WsSocket } from "ws";
 import { gameManager } from "./managers/gameManager";
 
 const PORT = Number(process.env.PORT) || 5555;
@@ -18,23 +18,28 @@ wss.on("connection", function connection(ws) {
     mainGameManager.handleDisconnect(ws);
   });
   ws.on("message", function message(data) {
-    const event = JSON.parse(data.toString());
-    //each event from a client gets its websocket acctached to it as its id
+    let event: { action: string; id?: WsSocket; gameObj?: unknown; move?: string; gameId?: string; sessionId?: string };
+    try {
+      event = JSON.parse(data.toString()) as typeof event;
+    } catch {
+      console.error("Invalid JSON from client");
+      return;
+    }
     event.id = ws;
     if (event.action == "createGame") {
-      mainGameManager.addPlayerToLobby(event);
+      mainGameManager.addPlayerToLobby(event as never);
     } else if (event.action == "cancelSearch") {
-      mainGameManager.removeFromLobby(event.id);
-    } else if (event.action == "makeMove") {
-      mainGameManager.makeMove(event.gameObj, event.move);
-    } else if (event.action == "resign") {
-      mainGameManager.resign(event.gameObj);
-    } else if (event.action == "leaveGame") {
-      mainGameManager.leaveGame(event.gameId, event.id);
-    } else if (event.action == "rejoin") {
-      mainGameManager.rejoin(event.sessionId, event.id);
+      mainGameManager.removeFromLobby(ws);
+    } else if (event.action == "makeMove" && event.gameObj != null && event.move != null) {
+      mainGameManager.makeMove(event.gameObj as never, event.move, ws);
+    } else if (event.action == "resign" && event.gameObj != null) {
+      mainGameManager.resign(event.gameObj as never, ws);
+    } else if (event.action == "leaveGame" && event.gameId != null) {
+      mainGameManager.leaveGame(event.gameId, ws);
+    } else if (event.action == "rejoin" && event.sessionId != null) {
+      mainGameManager.rejoin(event.sessionId, ws);
     }
   });
-  console.log("a player got made connection to this server");
+  console.log("Player connected");
   ws.send("connected to the game server");
 });

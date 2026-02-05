@@ -2,13 +2,8 @@
 
 import { useState, useEffect, useRef } from "react";
 import Script from "next/script";
-
-interface GameState {
-  gameId: string;
-  color: string;
-  opponent: string;
-  gameState: string;
-}
+import { LobbyView } from "./components/LobbyView";
+import { GameView, type GameState } from "./components/GameView";
 
 declare global {
   interface Window {
@@ -18,6 +13,13 @@ declare global {
     Chess: any;
   }
 }
+
+// WebSocket URL - use env var for production, fallback for local dev
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:5555";
+
+// Username constraints
+const USERNAME_MAX_LENGTH = 20;
+const USERNAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
 export default function Home() {
   const [ws, setWs] = useState<WebSocket | null>(null);
@@ -32,19 +34,22 @@ export default function Home() {
   const [jqueryLoaded, setJqueryLoaded] = useState(false);
   const [chessboardLoaded, setChessboardLoaded] = useState(false);
   const [chessJsLoaded, setChessJsLoaded] = useState(false);
+  const [connected, setConnected] = useState(false);
   const boardRef = useRef<any>(null);
   const chessRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const scriptsReady = jqueryLoaded && chessboardLoaded && chessJsLoaded;
-  const connected = ws?.readyState === 1;
 
-  // Load chessboard CSS
+  // Load chessboard CSS with SRI
   useEffect(() => {
     const link = document.createElement("link");
     link.rel = "stylesheet";
     link.href =
       "https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css";
+    link.integrity =
+      "sha384-q94+BZtLrkL1/ohfjR8c6L+A6qzNH9R2hBLwyoAfu3i/WCvQjzL2RQJ3uNHDISdU";
+    link.crossOrigin = "anonymous";
     document.head.appendChild(link);
     return () => {
       if (document.head.contains(link)) document.head.removeChild(link);
@@ -56,7 +61,17 @@ export default function Home() {
     if (typeof window === "undefined") return;
     let id = localStorage.getItem("chessSessionId");
     if (!id) {
-      id = crypto.randomUUID?.() ?? `session-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      // Use crypto.randomUUID or getRandomValues for strong session IDs
+      if (typeof crypto?.randomUUID === "function") {
+        id = crypto.randomUUID();
+      } else if (typeof crypto?.getRandomValues === "function") {
+        const bytes = new Uint8Array(16);
+        crypto.getRandomValues(bytes);
+        id = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+      } else {
+        // Last resort fallback (should not happen in modern browsers)
+        id = `session-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      }
       localStorage.setItem("chessSessionId", id);
     }
     sessionIdRef.current = id;
@@ -71,8 +86,9 @@ export default function Home() {
     let websocket: WebSocket;
 
     function connect() {
-      websocket = new WebSocket("ws://localhost:5556");
+      websocket = new WebSocket(WS_URL);
       websocket.onopen = () => {
+        setConnected(true);
         setStatusMessage(null);
         if (currentGameRef.current && sessionIdRef.current) {
           websocket.send(
@@ -92,7 +108,13 @@ export default function Home() {
                 prev ? { ...prev, gameState: data.state } : null
               );
               if (chessRef.current) chessRef.current.load(data.state);
-              if (boardRef.current) boardRef.current.position(data.state.split(" ")[0]);
+              if (boardRef.current) {
+                try {
+                  boardRef.current.position(data.state.split(" ")[0]);
+                } catch {
+                  // Board DOM may not be ready
+                }
+              }
             }
             setGameOver(true);
             if (data.reason === "opponent_left") {
@@ -125,15 +147,34 @@ export default function Home() {
         } catch {
           const text = event.data.toString();
           if (text.includes("connected")) setStatusMessage(null);
-          else if (text.includes("lobby") || text.includes("already in a game"))
+          else if (text.includes("lobby")) {
             setFindingGame(false);
-          setStatusMessage(text);
+            setStatusMessage(text);
+          } else if (text.includes("already in a game")) {
+            setFindingGame(false);
+            // Server says we're already in a game (e.g. we were matched but UI didn't show it).
+            // Auto-rejoin so we get the game state and show the board.
+            if (sessionIdRef.current) {
+              setStatusMessage("Rejoining your game…");
+              websocket.send(
+                JSON.stringify({
+                  action: "rejoin",
+                  sessionId: sessionIdRef.current,
+                })
+              );
+            } else {
+              setStatusMessage(text);
+            }
+          } else {
+            setStatusMessage(text);
+          }
         }
       };
       websocket.onerror = () =>
-        setStatusMessage("Connection error. Is the server running on port 5556?");
+        setStatusMessage("Connection error. Is the server running?");
       websocket.onclose = () => {
         setWs(null);
+        setConnected(false);
         setStatusMessage("Disconnected. Reconnecting…");
         if (mounted && currentGameRef.current) {
           reconnectTimeout = setTimeout(() => connect(), 2000);
@@ -178,7 +219,13 @@ export default function Home() {
       promotion: "q",
     });
     if (move === null) return "snapback";
-    if (boardRef.current) boardRef.current.position(chessRef.current.fen());
+    if (boardRef.current) {
+      try {
+        boardRef.current.position(chessRef.current.fen());
+      } catch {
+        // Board DOM may not be ready
+      }
+    }
     if (ws && currentGame) {
       ws.send(
         JSON.stringify({
@@ -200,14 +247,30 @@ export default function Home() {
 
   useEffect(() => {
     if (!currentGame || !scriptsReady) return;
-    const timer = setTimeout(() => {
+    const game = currentGame;
+    let cancelled = false;
+    let rafId: number | undefined;
+    let attempts = 0;
+    const maxAttempts = 60; // ~1s at 60fps
+
+    function tryInitBoard() {
+      if (cancelled || attempts >= maxAttempts) return;
+      attempts += 1;
+      const el = document.getElementById("myBoard");
       if (
+        !el ||
         typeof window.Chessboard === "undefined" ||
-        typeof window.Chess === "undefined" ||
-        !containerRef.current
-      )
+        typeof window.Chess === "undefined"
+      ) {
+        rafId = requestAnimationFrame(tryInitBoard);
         return;
-      chessRef.current = new window.Chess(currentGame.gameState);
+      }
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) {
+        rafId = requestAnimationFrame(tryInitBoard);
+        return;
+      }
+      chessRef.current = new window.Chess(game.gameState);
       if (boardRef.current) {
         try {
           boardRef.current.destroy();
@@ -215,8 +278,8 @@ export default function Home() {
       }
       try {
         boardRef.current = window.Chessboard("myBoard", {
-          position: currentGame.gameState.split(" ")[0],
-          orientation: currentGame.color === "white" ? "white" : "black",
+          position: game.gameState.split(" ")[0],
+          orientation: game.color === "white" ? "white" : "black",
           draggable: true,
           dropOffBoard: "snapback",
           pieceTheme:
@@ -225,15 +288,31 @@ export default function Home() {
           onDrop,
         });
       } catch {}
+    }
+
+    const timer = setTimeout(() => {
+      tryInitBoard();
     }, 100);
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      if (typeof rafId === "number") cancelAnimationFrame(rafId);
+    };
   }, [currentGame, scriptsReady]);
 
   // Sync board when server sends updated FEN (opponent move)
   useEffect(() => {
     if (!currentGame || !chessRef.current || !boardRef.current) return;
-    chessRef.current.load(currentGame.gameState);
-    boardRef.current.position(currentGame.gameState.split(" ")[0]);
+    const el = document.getElementById("myBoard");
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    try {
+      chessRef.current.load(currentGame.gameState);
+      boardRef.current.position(currentGame.gameState.split(" ")[0]);
+    } catch {
+      // Board DOM may not be ready; ignore to avoid "reading 'top'" crash
+    }
   }, [currentGame?.gameState]);
 
   // Timer while finding opponent
@@ -247,9 +326,21 @@ export default function Home() {
     return () => clearInterval(id);
   }, [findingGame]);
 
+  // Validate username: alphanumeric, _, -, max 20 chars
+  const validateUsername = (name: string): string | null => {
+    const trimmed = name.trim();
+    if (!trimmed) return "Enter a username to find a game.";
+    if (trimmed.length > USERNAME_MAX_LENGTH)
+      return `Username must be ${USERNAME_MAX_LENGTH} characters or less.`;
+    if (!USERNAME_PATTERN.test(trimmed))
+      return "Username can only contain letters, numbers, _ and -.";
+    return null; // valid
+  };
+
   const enterNewGame = () => {
-    if (!username.trim()) {
-      setStatusMessage("Enter a username to find a game.");
+    const error = validateUsername(username);
+    if (error) {
+      setStatusMessage(error);
       return;
     }
     setStatusMessage(null);
@@ -312,16 +403,22 @@ export default function Home() {
     <>
       <Script
         src="https://code.jquery.com/jquery-3.6.0.min.js"
+        integrity="sha512-894YE6QWD5I59HgZOGReFYm4dnWc1Qt5NtvYSaNcOP+u1T9qYdvdihz0PPSiiqn/+/3e7Jo4EaG7TubfWGUrMQ=="
+        crossOrigin="anonymous"
         strategy="afterInteractive"
         onLoad={() => setJqueryLoaded(true)}
       />
       <Script
         src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"
+        integrity="sha512-xRllwz2gdZciIB+AkEbeq+gVhX8VB8XsfqeFbUh+SzHlN96dEduwtTuVuc2u9EROlmW9+yhRlxjif66ORpsgVA=="
+        crossOrigin="anonymous"
         strategy="afterInteractive"
         onLoad={() => setChessJsLoaded(true)}
       />
       <Script
         src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"
+        integrity="sha384-8Vi8VHwn3vjQ9eUHUxex3JSN/NFqUg3QbPyX8kWyb93+8AC/pPWTzj+nHtbC5bxD"
+        crossOrigin="anonymous"
         strategy="afterInteractive"
         onLoad={() => setChessboardLoaded(true)}
       />
@@ -347,121 +444,27 @@ export default function Home() {
         </header>
 
         {!currentGame ? (
-          <section className="w-full max-w-md animate-fade-up text-center">
-            <p
-              className="text-[var(--cream-muted)] text-lg mb-8"
-              style={{ fontFamily: "var(--font-cormorant)" }}
-            >
-              Play a rapid game. You’ll be matched with another player.
-            </p>
-            <div className="space-y-4">
-              <input
-                type="text"
-                placeholder="Your username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && enterNewGame()}
-                className="w-full rounded-[var(--radius)] border border-[var(--felt-light)] bg-[var(--felt)] px-4 py-3 text-[var(--cream)] placeholder-[var(--cream-muted)] focus:border-[var(--gold)] focus:outline-none focus:ring-1 focus:ring-[var(--gold)]"
-                disabled={!connected || findingGame}
-              />
-              <button
-                onClick={enterNewGame}
-                disabled={!connected || findingGame || !scriptsReady}
-                className="w-full rounded-[var(--radius)] bg-[var(--gold)] px-4 py-3 font-medium text-[var(--ink)] transition hover:bg-[var(--gold-dim)] hover:text-[var(--cream)] disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {findingGame ? "Finding opponent…" : "Find a game"}
-              </button>
-              {findingGame && (
-                <div className="flex flex-col items-center gap-2">
-                  <div className="flex items-center justify-center gap-2 text-sm text-[var(--cream-muted)]">
-                    <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-[var(--cream-muted)] border-t-[var(--gold)]" aria-hidden />
-                    <span>Waiting {waitSeconds}s</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={cancelSearch}
-                    className="text-sm text-[var(--cream-muted)] underline hover:text-[var(--cream)]"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
-            </div>
-            {statusMessage && (
-              <p
-                className="mt-4 text-sm text-[var(--cream-muted)] animate-fade-up"
-                role="status"
-              >
-                {statusMessage}
-              </p>
-            )}
-          </section>
+          <LobbyView
+            username={username}
+            onUsernameChange={setUsername}
+            onFindGame={enterNewGame}
+            onCancelSearch={cancelSearch}
+            connected={connected}
+            findingGame={findingGame}
+            scriptsReady={scriptsReady}
+            waitSeconds={waitSeconds}
+            statusMessage={statusMessage}
+          />
         ) : (
-          <section className="flex flex-col items-center gap-6 animate-fade-up">
-            <div className="flex flex-wrap items-center justify-center gap-4 text-sm text-[var(--cream-muted)] animate-fade-up animate-fade-up-delay-1">
-              <span>
-                You play{" "}
-                <strong className="text-[var(--cream)]">
-                  {currentGame.color}
-                </strong>
-              </span>
-              <span>·</span>
-              <span>
-                Opponent:{" "}
-                <strong className="text-[var(--cream)]">
-                  {currentGame.opponent}
-                </strong>
-              </span>
-            </div>
-
-            <div
-              className={`board-frame animate-fade-up animate-fade-up-delay-2 ${myTurn ? "turn-indicator-active" : ""}`}
-              ref={containerRef}
-            >
-              <div
-                id="myBoard"
-                className="min-w-[320px] w-[min(80vw,400px)] aspect-square"
-              />
-            </div>
-
-            <div
-              className="text-center animate-fade-up animate-fade-up-delay-3"
-              role="status"
-            >
-              {gameOver ? (
-                <p className="text-[var(--gold)] font-medium">Game over.</p>
-              ) : myTurn ? (
-                <p className="text-[var(--gold)]">Your turn</p>
-              ) : (
-                <p className="text-[var(--cream-muted)]">Opponent’s turn</p>
-              )}
-            </div>
-
-            {!gameOver && currentGame && (
-              <div className="flex items-center gap-3 animate-fade-up animate-fade-up-delay-3">
-                <button
-                  type="button"
-                  onClick={resign}
-                  className="rounded-[var(--radius)] border border-[var(--felt-light)] bg-[var(--felt)] px-3 py-2 text-sm text-[var(--cream-muted)] hover:text-[var(--cream)]"
-                >
-                  Resign
-                </button>
-                <button
-                  type="button"
-                  onClick={leaveGame}
-                  className="rounded-[var(--radius)] border border-[var(--felt-light)] bg-[var(--felt)] px-3 py-2 text-sm text-[var(--cream-muted)] hover:text-[var(--cream)]"
-                >
-                  Leave game
-                </button>
-              </div>
-            )}
-
-            {statusMessage && (
-              <p className="text-sm text-[var(--cream-muted)]" role="alert">
-                {statusMessage}
-              </p>
-            )}
-          </section>
+          <GameView
+            currentGame={currentGame}
+            gameOver={gameOver}
+            myTurn={!!myTurn}
+            statusMessage={statusMessage}
+            containerRef={containerRef}
+            onResign={resign}
+            onLeaveGame={leaveGame}
+          />
         )}
       </div>
     </>
