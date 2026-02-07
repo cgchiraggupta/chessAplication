@@ -1,54 +1,106 @@
-import { playerGameObj } from "./gameManager";
-
+import { PlayerGameObj } from "./gameManager";
 import { Chess } from "chess.js";
 
-export interface moveOutput {
+export interface MoveOutput {
   valid: boolean;
   newState?: string;
   message: string;
   isGameEnd?: boolean;
+  endReason?: "checkmate" | "stalemate" | "threefold_repetition" | "insufficient_material" | "fifty_moves" | "draw";
 }
 
-export class moveManager {
-  chessObj: Chess;
+export class MoveManager {
+  private chess: Chess;
+
   constructor(initialGameState: string) {
-    this.chessObj = new Chess(initialGameState);
+    this.chess = new Chess(initialGameState);
   }
-  executeMove(gameObj: playerGameObj, move: string): moveOutput {
+
+  executeMove(gameObj: PlayerGameObj, move: string): MoveOutput {
     const color = gameObj.color;
-    const turn = this.chessObj.turn();
+    const turn = this.chess.turn();
+
+    // Validate it's the player's turn
     if (
-      (color == "white" && turn == "w") ||
-      (color == "black" && turn == "b")
+      (color === "white" && turn !== "w") ||
+      (color === "black" && turn !== "b")
     ) {
-      //the turn is valid
-      try {
-        this.chessObj.move(move);
-        const output: moveOutput = {
-          valid: true,
-          newState: this.chessObj.fen(),
-          message: "valid move updating the state",
-          isGameEnd: false,
-        };
-        if (this.chessObj.isCheckmate()) {
-          output.isGameEnd = true;
-        }
-        return output;
-      } catch (e) {
-        console.log(e);
-        return {
-          valid: false,
-          message: "the move itself is invalid",
-        };
-      }
-    } else {
-      //the person that made the move request doest not have their turn
-      //return with like a warning or something
-      const output: moveOutput = {
+      return {
         valid: false,
-        message: "not your turn rn",
+        message: "Not your turn",
       };
-      return output;
     }
+
+    // Attempt the move
+    try {
+      this.chess.move(move);
+    } catch (e) {
+      return {
+        valid: false,
+        message: "Invalid move",
+      };
+    }
+
+    const newState = this.chess.fen();
+
+    // Check all game end conditions
+    if (this.chess.isCheckmate()) {
+      return {
+        valid: true,
+        newState,
+        message: "Checkmate",
+        isGameEnd: true,
+        endReason: "checkmate",
+      };
+    }
+
+    if (this.chess.isStalemate()) {
+      return {
+        valid: true,
+        newState,
+        message: "Stalemate - draw",
+        isGameEnd: true,
+        endReason: "stalemate",
+      };
+    }
+
+    if (this.chess.isThreefoldRepetition()) {
+      return {
+        valid: true,
+        newState,
+        message: "Threefold repetition - draw",
+        isGameEnd: true,
+        endReason: "threefold_repetition",
+      };
+    }
+
+    if (this.chess.isInsufficientMaterial()) {
+      return {
+        valid: true,
+        newState,
+        message: "Insufficient material - draw",
+        isGameEnd: true,
+        endReason: "insufficient_material",
+      };
+    }
+
+    if (this.chess.isDraw()) {
+      // This catches 50-move rule and other draw conditions
+      return {
+        valid: true,
+        newState,
+        message: "Draw",
+        isGameEnd: true,
+        endReason: "fifty_moves",
+      };
+    }
+
+    // Game continues
+    return {
+      valid: true,
+      newState,
+      message: "Move accepted",
+      isGameEnd: false,
+    };
   }
 }

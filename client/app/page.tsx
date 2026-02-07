@@ -100,74 +100,112 @@ export default function Home() {
         }
       };
       websocket.onmessage = (event) => {
+        let data: Record<string, unknown>;
         try {
-          const data = JSON.parse(event.data);
-          if (data.message === "game is over") {
-            if (data.state) {
-              setCurrentGame((prev) =>
-                prev ? { ...prev, gameState: data.state } : null
-              );
-              if (chessRef.current) chessRef.current.load(data.state);
-              if (boardRef.current) {
-                try {
-                  boardRef.current.position(data.state.split(" ")[0]);
-                } catch {
-                  // Board DOM may not be ready
-                }
+          data = JSON.parse(event.data);
+        } catch {
+          // Non-JSON message - ignore
+          return;
+        }
+
+        // Handle server shutdown
+        if (data.message === "server_shutdown") {
+          setStatusMessage("Server is restarting. Please wait...");
+          setConnected(false);
+          return;
+        }
+
+        // Handle connection confirmation
+        if (data.message === "connected" && data.status === "ok") {
+          setStatusMessage(null);
+          return;
+        }
+
+        // Handle rate limiting
+        if (data.message === "Rate limited. Slow down.") {
+          setStatusMessage("Too many requests. Please slow down.");
+          return;
+        }
+
+        // Handle game over
+        if (data.message === "game is over") {
+          if (data.state && typeof data.state === "string") {
+            setCurrentGame((prev) =>
+              prev ? { ...prev, gameState: data.state as string } : null
+            );
+            if (chessRef.current) chessRef.current.load(data.state);
+            if (boardRef.current) {
+              try {
+                boardRef.current.position((data.state as string).split(" ")[0]);
+              } catch {
+                // Board DOM may not be ready
               }
             }
-            setGameOver(true);
-            if (data.reason === "opponent_left") {
-              setStatusMessage("Opponent left.");
-              setTimeout(() => {
-                setCurrentGame(null);
-                setGameOver(false);
-                setStatusMessage(null);
-              }, 2000);
-            } else if (data.reason === "resign") {
-              setStatusMessage("Game over (resignation).");
-            } else {
-              setStatusMessage("Game over.");
-            }
-            return;
           }
-          if (data.gameId && data.gameState) {
-            setFindingGame(false);
-            setGameOver(false);
-            setStatusMessage(null);
-            setCurrentGame(data);
-            return;
-          }
-          if (data.message === "no game to rejoin") {
-            setStatusMessage("No game to rejoin.");
-            setCurrentGame(null);
-            currentGameRef.current = null;
-            return;
-          }
-        } catch {
-          const text = event.data.toString();
-          if (text.includes("connected")) setStatusMessage(null);
-          else if (text.includes("lobby")) {
-            setFindingGame(false);
-            setStatusMessage(text);
-          } else if (text.includes("already in a game")) {
-            setFindingGame(false);
-            // Server says we're already in a game (e.g. we were matched but UI didn't show it).
-            // Auto-rejoin so we get the game state and show the board.
-            if (sessionIdRef.current) {
-              setStatusMessage("Rejoining your game…");
-              websocket.send(
-                JSON.stringify({
-                  action: "rejoin",
-                  sessionId: sessionIdRef.current,
-                })
-              );
-            } else {
-              setStatusMessage(text);
-            }
+          setGameOver(true);
+          if (data.reason === "opponent_left") {
+            setStatusMessage("Opponent left.");
+            setTimeout(() => {
+              setCurrentGame(null);
+              setGameOver(false);
+              setStatusMessage(null);
+            }, 2000);
+          } else if (data.reason === "resign") {
+            const winner = data.winner === currentGame?.color ? "You win!" : "You lost.";
+            setStatusMessage(`Game over (resignation). ${winner}`);
+          } else if (data.reason === "stalemate") {
+            setStatusMessage("Game over - Stalemate (draw).");
+          } else if (data.reason === "threefold_repetition") {
+            setStatusMessage("Game over - Threefold repetition (draw).");
+          } else if (data.reason === "insufficient_material") {
+            setStatusMessage("Game over - Insufficient material (draw).");
+          } else if (data.reason === "fifty_moves") {
+            setStatusMessage("Game over - 50-move rule (draw).");
+          } else if (data.reason === "checkmate") {
+            setStatusMessage("Checkmate!");
           } else {
-            setStatusMessage(text);
+            setStatusMessage("Game over.");
           }
+          return;
+        }
+
+        // Handle game start/rejoin
+        if (data.gameId && data.gameState) {
+          setFindingGame(false);
+          setGameOver(false);
+          setStatusMessage(null);
+          setCurrentGame(data as unknown as GameState);
+          return;
+        }
+
+        // Handle no game to rejoin
+        if (data.message === "no game to rejoin") {
+          setStatusMessage(null);
+          setCurrentGame(null);
+          currentGameRef.current = null;
+          return;
+        }
+
+        // Handle already in game
+        if (typeof data.message === "string" && data.message.includes("already in a game")) {
+          setFindingGame(false);
+          if (sessionIdRef.current) {
+            setStatusMessage("Rejoining your game...");
+            websocket.send(
+              JSON.stringify({
+                action: "rejoin",
+                sessionId: sessionIdRef.current,
+              })
+            );
+          } else {
+            setStatusMessage(data.message);
+          }
+          return;
+        }
+
+        // Handle other messages
+        if (typeof data.message === "string") {
+          setStatusMessage(data.message);
         }
       };
       websocket.onerror = () =>
