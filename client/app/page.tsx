@@ -461,21 +461,21 @@ export default function Home() {
         onLoad={() => setChessboardLoaded(true)}
       />
 
-      <div className="relative z-10 min-h-screen flex flex-col items-center justify-center px-4 py-10">
-        <header className="absolute top-0 left-0 right-0 flex items-center justify-between px-6 py-4">
+      <div className="relative z-10 min-h-screen flex flex-col items-center justify-center px-4 py-16 sm:py-10">
+        <header className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4">
           <h1
-            className="text-2xl font-semibold tracking-tight text-[var(--cream)]"
+            className="text-xl sm:text-2xl font-semibold tracking-tight text-[var(--cream)]"
             style={{ fontFamily: "var(--font-cormorant)" }}
           >
             Chess
           </h1>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <span
               className={`h-2 w-2 rounded-full ${
                 connected ? "bg-[var(--success)]" : "bg-[var(--error)]"
               }`}
             />
-            <span className="text-sm text-[var(--cream-muted)]">
+            <span className="text-xs sm:text-sm text-[var(--cream-muted)]">
               {connected ? "Connected" : "Disconnected"}
             </span>
           </div>

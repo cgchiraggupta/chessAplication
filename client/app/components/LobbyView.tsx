@@ -24,12 +24,12 @@ export const LobbyView = memo(function LobbyView({
   statusMessage,
 }: LobbyViewProps) {
   return (
-    <section className="w-full max-w-md animate-fade-up text-center">
+    <section className="w-full max-w-md px-4 sm:px-0 animate-fade-up text-center">
       <p
-        className="text-[var(--cream-muted)] text-lg mb-8"
+        className="text-[var(--cream-muted)] text-base sm:text-lg mb-6 sm:mb-8"
         style={{ fontFamily: "var(--font-cormorant)" }}
       >
-        Play a rapid game. You’ll be matched with another player.
+        Play a rapid game. You'll be matched with another player.
       </p>
       <div className="space-y-4">
         <input
@@ -38,13 +38,16 @@ export const LobbyView = memo(function LobbyView({
           value={username}
           onChange={(e) => onUsernameChange(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && onFindGame()}
-          className="w-full rounded-[var(--radius)] border border-[var(--felt-light)] bg-[var(--felt)] px-4 py-3 text-[var(--cream)] placeholder-[var(--cream-muted)] focus:border-[var(--gold)] focus:outline-none focus:ring-1 focus:ring-[var(--gold)]"
+          className="w-full rounded-[var(--radius)] border border-[var(--felt-light)] bg-[var(--felt)] px-4 py-3 text-base sm:text-sm text-[var(--cream)] placeholder-[var(--cream-muted)] focus:border-[var(--gold)] focus:outline-none focus:ring-1 focus:ring-[var(--gold)]"
           disabled={!connected || findingGame}
+          autoComplete="username"
+          autoCapitalize="off"
+          autoCorrect="off"
         />
         <button
           onClick={onFindGame}
           disabled={!connected || findingGame || !scriptsReady}
-          className="w-full rounded-[var(--radius)] bg-[var(--gold)] px-4 py-3 font-medium text-[var(--ink)] transition hover:bg-[var(--gold-dim)] hover:text-[var(--cream)] disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full rounded-[var(--radius)] bg-[var(--gold)] px-4 py-3 sm:py-3 font-medium text-base sm:text-sm text-[var(--ink)] transition hover:bg-[var(--gold-dim)] hover:text-[var(--cream)] active:bg-[var(--gold-dim)] disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation"
         >
           {findingGame ? "Finding opponent…" : "Find a game"}
         </button>

@@ -88,3 +88,29 @@ body {
 .animate-fade-up-delay-1 { animation-delay: 0.08s; }
 .animate-fade-up-delay-2 { animation-delay: 0.16s; }
 .animate-fade-up-delay-3 { animation-delay: 0.24s; }
+
+/* Mobile touch optimizations */
+.touch-manipulation {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Prevent text selection on game board */
+#myBoard {
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+/* Safe area insets for notched phones */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .min-h-screen {
+    min-height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* Prevent pull-to-refresh on game board */
+body {
+  overscroll-behavior-y: contain;
+}

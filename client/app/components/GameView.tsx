@@ -46,7 +46,7 @@ export const GameView = memo(function GameView({
       >
         <div
           id="myBoard"
-          className="min-w-[320px] w-[min(80vw,400px)] aspect-square"
+          className="min-w-[280px] w-[min(90vw,420px)] sm:w-[min(80vw,400px)] aspect-square"
         />
       </div>
 
@@ -68,14 +68,14 @@ export const GameView = memo(function GameView({
           <button
             type="button"
             onClick={onResign}
-            className="rounded-[var(--radius)] border border-[var(--felt-light)] bg-[var(--felt)] px-3 py-2 text-sm text-[var(--cream-muted)] hover:text-[var(--cream)]"
+            className="rounded-[var(--radius)] border border-[var(--felt-light)] bg-[var(--felt)] px-4 py-3 sm:px-3 sm:py-2 text-sm text-[var(--cream-muted)] hover:text-[var(--cream)] active:bg-[var(--felt-light)] touch-manipulation"
           >
             Resign
           </button>
           <button
             type="button"
             onClick={onLeaveGame}
-            className="rounded-[var(--radius)] border border-[var(--felt-light)] bg-[var(--felt)] px-3 py-2 text-sm text-[var(--cream-muted)] hover:text-[var(--cream)]"
+            className="rounded-[var(--radius)] border border-[var(--felt-light)] bg-[var(--felt)] px-4 py-3 sm:px-3 sm:py-2 text-sm text-[var(--cream-muted)] hover:text-[var(--cream)] active:bg-[var(--felt-light)] touch-manipulation"
           >
             Leave game
           </button>
