@@ -29,7 +29,7 @@ export const LobbyView = memo(function LobbyView({
         className="text-[var(--cream-muted)] text-base sm:text-lg mb-6 sm:mb-8"
         style={{ fontFamily: "var(--font-cormorant)" }}
       >
-        Play a rapid game. You'll be matched with another player.
+        Play a rapid game. You&apos;ll be matched with another player.
       </p>
       <div className="space-y-4">
         <input

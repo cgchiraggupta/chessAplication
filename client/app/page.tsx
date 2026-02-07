@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Script from "next/script";
 import { LobbyView } from "./components/LobbyView";
 import { GameView, type GameState } from "./components/GameView";
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 declare global {
   interface Window {
     Chessboard: any;
@@ -13,6 +14,7 @@ declare global {
     Chess: any;
   }
 }
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 // WebSocket URL - use env var for production, fallback for local dev
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:5555";
@@ -35,7 +37,9 @@ export default function Home() {
   const [chessboardLoaded, setChessboardLoaded] = useState(false);
   const [chessJsLoaded, setChessJsLoaded] = useState(false);
   const [connected, setConnected] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const boardRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const chessRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -77,7 +81,10 @@ export default function Home() {
     sessionIdRef.current = id;
   }, []);
 
-  currentGameRef.current = currentGame;
+  // Keep ref in sync with state for use in callbacks
+  useEffect(() => {
+    currentGameRef.current = currentGame;
+  }, [currentGame]);
 
   // WebSocket with reconnect when in a game
   useEffect(() => {
@@ -151,7 +158,7 @@ export default function Home() {
               setStatusMessage(null);
             }, 2000);
           } else if (data.reason === "resign") {
-            const winner = data.winner === currentGame?.color ? "You win!" : "You lost.";
+            const winner = data.winner === currentGameRef.current?.color ? "You win!" : "You lost.";
             setStatusMessage(`Game over (resignation). ${winner}`);
           } else if (data.reason === "stalemate") {
             setStatusMessage("Game over - Stalemate (draw).");
@@ -228,60 +235,69 @@ export default function Home() {
     };
   }, []);
 
-  const onDragStart = (
-    source: string,
-    piece: string,
-    _position: any,
-    _orientation: string
-  ) => {
-    if (!chessRef.current || !currentGame || gameOver) return false;
-    if (chessRef.current.game_over()) return false;
-    const turn = chessRef.current.turn();
-    const playerColor = currentGame.color;
-    if (
-      (turn === "w" && playerColor !== "white") ||
-      (turn === "b" && playerColor !== "black")
-    )
-      return false;
-    const pieceColor = piece[0];
-    const allowedColor = playerColor === "white" ? "w" : "b";
-    if (pieceColor !== allowedColor) return false;
-    return true;
-  };
+  // Chessboard.js callback - parameters are required by API but not all are used
+  const onDragStart = useCallback(
+    (
+      _source: string,
+      piece: string,
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      _position: Record<string, string>,
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      _orientation: string
+    ) => {
+      if (!chessRef.current || !currentGame || gameOver) return false;
+      if (chessRef.current.game_over()) return false;
+      const turn = chessRef.current.turn();
+      const playerColor = currentGame.color;
+      if (
+        (turn === "w" && playerColor !== "white") ||
+        (turn === "b" && playerColor !== "black")
+      )
+        return false;
+      const pieceColor = piece[0];
+      const allowedColor = playerColor === "white" ? "w" : "b";
+      if (pieceColor !== allowedColor) return false;
+      return true;
+    },
+    [currentGame, gameOver]
+  );
 
-  const onDrop = (source: string, target: string) => {
-    if (!chessRef.current) return "snapback";
-    const move = chessRef.current.move({
-      from: source,
-      to: target,
-      promotion: "q",
-    });
-    if (move === null) return "snapback";
-    if (boardRef.current) {
-      try {
-        boardRef.current.position(chessRef.current.fen());
-      } catch {
-        // Board DOM may not be ready
+  const onDrop = useCallback(
+    (source: string, target: string) => {
+      if (!chessRef.current) return "snapback";
+      const move = chessRef.current.move({
+        from: source,
+        to: target,
+        promotion: "q",
+      });
+      if (move === null) return "snapback";
+      if (boardRef.current) {
+        try {
+          boardRef.current.position(chessRef.current.fen());
+        } catch {
+          // Board DOM may not be ready
+        }
       }
-    }
-    if (ws && currentGame) {
-      ws.send(
-        JSON.stringify({
-          username,
-          action: "makeMove",
-          move: move.san,
-          gameObj: {
-            gameId: currentGame.gameId,
-            color: currentGame.color,
-            opponent: currentGame.opponent,
-            gameState: chessRef.current.fen(),
-          },
-          timeControl: "rapid",
-        })
-      );
-    }
-    return undefined;
-  };
+      if (ws && currentGame) {
+        ws.send(
+          JSON.stringify({
+            username,
+            action: "makeMove",
+            move: move.san,
+            gameObj: {
+              gameId: currentGame.gameId,
+              color: currentGame.color,
+              opponent: currentGame.opponent,
+              gameState: chessRef.current.fen(),
+            },
+            timeControl: "rapid",
+          })
+        );
+      }
+      return undefined;
+    },
+    [ws, currentGame, username]
+  );
 
   useEffect(() => {
     if (!currentGame || !scriptsReady) return;
@@ -336,7 +352,7 @@ export default function Home() {
       clearTimeout(timer);
       if (typeof rafId === "number") cancelAnimationFrame(rafId);
     };
-  }, [currentGame, scriptsReady]);
+  }, [currentGame, scriptsReady, onDragStart, onDrop]);
 
   // Sync board when server sends updated FEN (opponent move)
   useEffect(() => {
@@ -351,17 +367,17 @@ export default function Home() {
     } catch {
       // Board DOM may not be ready; ignore to avoid "reading 'top'" crash
     }
-  }, [currentGame?.gameState]);
+  }, [currentGame]);
 
   // Timer while finding opponent
   useEffect(() => {
-    if (!findingGame) {
-      setWaitSeconds(0);
-      return;
-    }
+    if (!findingGame) return;
     const start = Date.now();
     const id = setInterval(() => setWaitSeconds(Math.floor((Date.now() - start) / 1000)), 1000);
-    return () => clearInterval(id);
+    return () => {
+      clearInterval(id);
+      setWaitSeconds(0);
+    };
   }, [findingGame]);
 
   // Validate username: alphanumeric, _, -, max 20 chars
